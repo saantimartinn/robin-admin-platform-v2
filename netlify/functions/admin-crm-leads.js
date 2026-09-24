@@ -12,7 +12,7 @@ async function requireAdmin(event) {
 }
 
 exports.handler = async (event) => {
-  if (!['GET', 'PATCH'].includes(event.httpMethod)) return methodNotAllowed(['GET', 'PATCH']);
+  if (!['GET', 'PATCH', 'DELETE'].includes(event.httpMethod)) return methodNotAllowed(['GET', 'PATCH', 'DELETE']);
   try {
     const admin = await requireAdmin(event);
     if (!admin) return json({ error: 'unauthorized' }, { statusCode: 401 });
@@ -23,6 +23,12 @@ exports.handler = async (event) => {
       return json({ leads: data || [] });
     }
     const body = parseJsonBody(event);
+    if (event.httpMethod === 'DELETE') {
+      if (!body.id) return json({ error: 'invalid_request' }, { statusCode: 400 });
+      const { error } = await crm.from('crm_leads').delete().eq('id', body.id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
     if (!body.id || !body.patch || typeof body.patch !== 'object') return json({ error: 'invalid_request' }, { statusCode: 400 });
     const allowed = ['owner_names', 'lead_type', 'crm_stage', 'heat', 'comment', 'lost_at'];
     const update = Object.fromEntries(Object.entries(body.patch).filter(([key]) => allowed.includes(key)));

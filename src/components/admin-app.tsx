@@ -245,6 +245,17 @@ export function AdminApp({ authUser, onLogout }: { authUser: PortalAdmin; onLogo
     setNotice(`${cleanName} se ha añadido al equipo de administración`);
   }
 
+  async function deleteLead(id: string) {
+    await adminDataClient.deleteLead(id);
+    setCrmContacts((contacts) => contacts.filter((contact) => contact.id !== id));
+    setLeadOwners((values) => { const next = { ...values }; delete next[id]; return next; });
+    setLeadStages((values) => { const next = { ...values }; delete next[id]; return next; });
+    setLeadCategories((values) => { const next = { ...values }; delete next[id]; return next; });
+    setLeadHeat((values) => { const next = { ...values }; delete next[id]; return next; });
+    setLeadNotes((values) => { const next = { ...values }; delete next[id]; return next; });
+    setLeadLostDates((values) => { const next = { ...values }; delete next[id]; return next; });
+  }
+
   const dashboardLoading =
     (!crmLoaded && (path === "/bandeja-leads" || path.startsWith("/crm"))) ||
     (portalLoading && (["/", "/alumnos-global", "/pagos"].includes(path) || path.startsWith("/informes/inicio"))) ||
@@ -308,6 +319,7 @@ export function AdminApp({ authUser, onLogout }: { authUser: PortalAdmin; onLogo
               contacts={crmContacts}
               leadOwners={leadOwners}
               onAssignLead={(id, owner) => { setLeadOwners((owners) => ({ ...owners, [id]: owner })); persistLead(id, { owner }); }}
+              onDeleteLead={deleteLead}
               leadStages={leadStages}
               onMoveLead={moveLead}
               leadCategories={leadCategories}
@@ -361,7 +373,7 @@ function dashboardReportUrl(type: "altas" | "embudo" | "facturacion", period: st
 }
 
 function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { snapshot: PortalSnapshot | null; contacts: Contact[]; leadStages: Record<string, CrmStage>; currentUser: string; holded: HoldedSnapshot | null }) {
-  const [period, setPeriod] = useState<"7" | "15" | "30" | "all">("30");
+  const [period, setPeriod] = useState<"7" | "15" | "30" | "all">("all");
   const today = new Date(); today.setHours(23, 59, 59, 999);
   const dated = [...contacts.map((item) => item.createdAt), ...(snapshot?.clients || []).map((item) => item.created_at)].filter((value): value is string => Boolean(value));
   const periodDays = period === "all" ? null : Number(period);
@@ -371,23 +383,18 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
   const inRange = (value?: string) => Boolean(value && new Date(value) >= rangeStart && new Date(value) <= today);
   const periodLabel = period === "7" ? "Últimos 7 días" : period === "15" ? "Últimos 15 días" : period === "30" ? "Últimos 30 días" : "Todo el histórico";
   const clients = snapshot?.clients || [];
+  const crmClients = contacts.filter((lead) => (leadStages[lead.id] || lead.stage) === "Cliente");
   const newLeads = contacts.filter((lead) => inRange(lead.createdAt));
-  const newClients = clients.filter((client) => inRange(client.created_at));
+  const newClients = crmClients.filter((client) => inRange(client.clientAt));
   const activeLeads = contacts.filter((lead) => !["Cliente", "Lost"].includes(leadStages[lead.id] || lead.stage || "Por contactar"));
   const liveStats = [
     ["Leads activos", String(activeLeads.length), "CRM conectado", Users, "blue", null],
     ["Nuevos leads", String(newLeads.length), periodLabel, Sparkles, "gold", null],
-    ["Clientes del portal", String(clients.length), `${clients.filter((client) => client.requires_onboarding).length} en onboarding`, GraduationCap, "green", null],
+    ["Clientes", String(crmClients.length), `${clients.length} con acceso al portal`, GraduationCap, "green", null],
     ["Facturado este año", holded ? `${Math.round(holded.currentYear.billed).toLocaleString("es-ES")} €` : "—", holded ? `${holded.currentYear.invoices} facturas en Holded` : "Holded no disponible", CircleDollarSign, "red", dashboardReportUrl("facturacion", period)],
   ] as const;
-  const visibleDays = Math.min(31, Math.max(1, Math.floor((today.getTime() - rangeStart.getTime()) / 86400000) + 1));
-  const chartStart = new Date(today); chartStart.setDate(today.getDate() - visibleDays + 1); chartStart.setHours(0, 0, 0, 0);
-  const dailyData = Array.from({ length: visibleDays }, (_, index) => {
-    const start = new Date(chartStart); start.setDate(chartStart.getDate() + index);
-    const end = new Date(start); end.setDate(start.getDate() + 1);
-    const sameDay = (value?: string) => Boolean(value && new Date(value) >= start && new Date(value) < end);
-    return { day: start.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }).replace(".", ""), leads: contacts.filter((lead) => sameDay(lead.createdAt)).length, clients: clients.filter((client) => sameDay(client.created_at)).length };
-  });
+  const visibleDays = Math.max(1, Math.floor((today.getTime() - rangeStart.getTime()) / 86400000) + 1);
+  const chartData = period === "all" ? monthlySeries(rangeStart, today, contacts, crmClients) : dailySeries(rangeStart, visibleDays, contacts, crmClients);
   const hotLeads = contacts.filter((lead) => lead.owner === currentUser && (lead.heat || 0) >= 80 && !["Cliente", "Lost"].includes(leadStages[lead.id] || lead.stage || "Por contactar"));
   const funnelStages: Array<[string, CrmStage]> = [["Por contactar", "Por contactar"], ["Contactados", "Contactado"], ["Llamadas", "Llamada programada"], ["Propuestas", "Propuesta enviada"], ["Clientes", "Cliente"]];
   const funnel = funnelStages.map(([label, stage]) => [label, contacts.filter((lead) => (leadStages[lead.id] || lead.stage || "Por contactar") === stage).length] as const);
@@ -409,7 +416,7 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
           <header className="phead"><div><h2>Nuevos leads y clientes</h2><p>Altas diarias · {periodLabel.toLowerCase()}</p></div><span className="report-hint">Ver informe <ExternalLink /></span></header>
           <div className="chart-legend"><span className="leads">Leads</span><span className="clients">Clientes</span></div>
           <ResponsiveContainer width="100%" height={270}>
-            <LineChart data={dailyData} margin={{ left: -24, right: 10 }}><CartesianGrid vertical={false} stroke="#e8edf3" /><XAxis dataKey="day" axisLine={false} tickLine={false} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Line type="monotone" dataKey="leads" name="Leads" stroke="#1f416f" strokeWidth={3} dot={{ r: 3, fill: "#1f416f" }} activeDot={{ r: 5 }} /><Line type="monotone" dataKey="clients" name="Clientes" stroke="#d69b3b" strokeWidth={3} dot={{ r: 3, fill: "#d69b3b" }} activeDot={{ r: 5 }} /></LineChart>
+            <LineChart data={chartData} margin={{ left: -24, right: 10 }}><CartesianGrid vertical={false} stroke="#e8edf3" /><XAxis dataKey="day" axisLine={false} tickLine={false} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Line type="monotone" dataKey="leads" name="Leads" stroke="#1f416f" strokeWidth={3} dot={{ r: 3, fill: "#1f416f" }} activeDot={{ r: 5 }} /><Line type="monotone" dataKey="clients" name="Clientes" stroke="#d69b3b" strokeWidth={3} dot={{ r: 3, fill: "#d69b3b" }} activeDot={{ r: 5 }} /></LineChart>
           </ResponsiveContainer>
         </a>
 
@@ -435,6 +442,26 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
   );
 }
 
+function dailySeries(startDate: Date, days: number, contacts: Contact[], clients: Contact[]) {
+  return Array.from({ length: days }, (_, index) => {
+    const start = new Date(startDate); start.setDate(startDate.getDate() + index);
+    const end = new Date(start); end.setDate(start.getDate() + 1);
+    const inDay = (value?: string) => Boolean(value && new Date(value) >= start && new Date(value) < end);
+    return { day: start.toLocaleDateString("es-ES", { day: "2-digit", month: "short" }).replace(".", ""), leads: contacts.filter((lead) => inDay(lead.createdAt)).length, clients: clients.filter((client) => inDay(client.clientAt)).length };
+  });
+}
+
+function monthlySeries(startDate: Date, endDate: Date, contacts: Contact[], clients: Contact[]) {
+  const first = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const months = (endDate.getFullYear() - first.getFullYear()) * 12 + endDate.getMonth() - first.getMonth() + 1;
+  return Array.from({ length: months }, (_, index) => {
+    const start = new Date(first.getFullYear(), first.getMonth() + index, 1);
+    const end = new Date(first.getFullYear(), first.getMonth() + index + 1, 1);
+    const inMonth = (value?: string) => Boolean(value && new Date(value) >= start && new Date(value) < end);
+    return { day: start.toLocaleDateString("es-ES", { month: "short", year: "2-digit" }).replace(".", ""), leads: contacts.filter((lead) => inMonth(lead.createdAt)).length, clients: clients.filter((client) => inMonth(client.clientAt)).length };
+  });
+}
+
 function DashboardReport({ snapshot, contacts, leadStages, holded }: { snapshot: PortalSnapshot | null; contacts: Contact[]; leadStages: Record<string, CrmStage>; holded: HoldedSnapshot | null }) {
   const params = new URLSearchParams(window.location.search);
   const type = params.get("tipo") || "altas";
@@ -445,8 +472,9 @@ function DashboardReport({ snapshot, contacts, leadStages, holded }: { snapshot:
   if (start) start.setHours(0, 0, 0, 0);
   const inRange = (date?: string | null) => Boolean(date && (!start || new Date(date) >= start) && new Date(date) <= today);
   const clients = snapshot?.clients || [];
+  const crmClients = contacts.filter((lead) => (leadStages[lead.id] || lead.stage) === "Cliente");
   const leadsInRange = contacts.filter((lead) => inRange(lead.createdAt));
-  const clientsInRange = clients.filter((client) => inRange(client.created_at));
+  const clientsInRange = crmClients.filter((client) => inRange(client.clientAt));
   const periodLabel = periodDays ? `Últimos ${periodDays} días` : "Todo el histórico";
   const stages: Array<[string, CrmStage]> = [["Por contactar", "Por contactar"], ["Contactados", "Contactado"], ["Llamadas programadas", "Llamada programada"], ["Propuestas enviadas", "Propuesta enviada"], ["Clientes", "Cliente"]];
   const title = type === "facturacion" ? "Informe de facturación anual" : type === "embudo" ? "Informe del embudo de captación" : "Informe de nuevos leads y clientes";
@@ -456,8 +484,8 @@ function DashboardReport({ snapshot, contacts, leadStages, holded }: { snapshot:
 
     {type === "altas" && <>
       <section className="report-summary"><article><span>Leads</span><strong>{leadsInRange.length}</strong><small>Registros del CRM creados en el periodo</small></article><article><span>Clientes</span><strong>{clientsInRange.length}</strong><small>Altas del Portal del Alumno en el periodo</small></article><article><span>Periodo</span><strong>{periodLabel}</strong><small>{start ? `${start.toLocaleDateString("es-ES")} – ${today.toLocaleDateString("es-ES")}` : "Sin límite de fecha inicial"}</small></article></section>
-      <ReportMethod text="Cada punto de la gráfica cuenta los registros cuya fecha de creación cae dentro de ese día natural. La línea azul procede del CRM y la naranja del Portal del Alumno." />
-      <ReportTable headers={["Tipo", "Nombre", "Email", "Fecha de alta"]} rows={[...leadsInRange.map((lead) => ["Lead", lead.name, lead.email, formatReportDate(lead.createdAt)]), ...clientsInRange.map((client) => ["Cliente", [client.nombre, client.apellidos].filter(Boolean).join(" ") || "Sin nombre", client.email || "—", formatReportDate(client.created_at)])]} />
+      <ReportMethod text="La línea azul usa la fecha original de creación conservada desde Notion. La naranja cuenta los registros INSIDE por su Fecha Inside. En la vista histórica los puntos se agrupan por mes; en los periodos de 7, 15 o 30 días se agrupan por día." />
+      <ReportTable headers={["Tipo", "Nombre", "Email", "Fecha"]} rows={[...leadsInRange.map((lead) => ["Lead", lead.name, lead.email, formatReportDate(lead.createdAt)]), ...clientsInRange.map((client) => ["Cliente", client.name, client.email || "—", formatReportDate(client.clientAt)])]} />
     </>}
 
     {type === "embudo" && <>

@@ -23,7 +23,7 @@ function toContact(row: Record<string, any>): Contact {
   const name = row.name || "Sin nombre";
   const stage = (row.crm_stage || "Por contactar") as CrmStage;
   const category = row.lead_type === "Delft" ? "delft" : row.lead_type;
-  return { id: row.id, name, initials: name.split(/\s+/).slice(0, 2).map((part: string) => part[0] || "").join("").toUpperCase(), email: row.email || "", phone: row.phone || "", country: "", university: row.school_name || "", course: "", product: "Aplicación", status: statusFor(stage), source: sourceFor(row), campaign: row.source_payload?.campaign_name || row.source_payload?.form_name || "—", owner: row.owner_names?.[0] || "", probability: Number(row.heat || 0), nextAction: "", lastContact: row.contact_at || "—", value: 0, tags: [], category: category as LeadCategory | undefined, heat: Number(row.heat ?? 50), notes: row.comment || "", stage, lostAt: row.lost_at || undefined, createdAt: row.created_at || undefined };
+  return { id: row.id, name, initials: name.split(/\s+/).slice(0, 2).map((part: string) => part[0] || "").join("").toUpperCase(), email: row.email || "", phone: row.phone || "", country: "", university: row.school_name || "", course: "", product: "Aplicación", status: statusFor(stage), source: sourceFor(row), campaign: row.source_payload?.campaign_name || row.source_payload?.form_name || "—", owner: row.owner_names?.[0] || "", probability: Number(row.heat || 0), nextAction: "", lastContact: row.contact_at || "—", value: 0, tags: [], category: category as LeadCategory | undefined, heat: Number(row.heat ?? 50), notes: row.comment || "", stage, lostAt: row.lost_at || undefined, createdAt: row.source_created_at || row.created_at || undefined, clientAt: row.inside_at || undefined };
 }
 
 export const adminDataClient = {
@@ -43,6 +43,11 @@ export const adminDataClient = {
     if (patch.lostAt !== undefined) update.lost_at = patch.lostAt || null;
     const response = await fetch("/api/admin/crm/leads", { method: "PATCH", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, patch: update }) });
     if (!response.ok) throw new Error("No se pudo actualizar el lead");
+    return { ok: true };
+  },
+  async deleteLead(id: string) {
+    const response = await fetch("/api/admin/crm/leads", { method: "DELETE", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
+    if (!response.ok) throw new Error("No se pudo eliminar el lead");
     return { ok: true };
   },
   subscribe(onChange: () => void) {

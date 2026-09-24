@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   TrendingUp,
+  Trash2,
   UserCheck,
   UserPlus,
   WalletCards,
@@ -45,6 +46,7 @@ type FeatureModuleProps = {
   contacts: Contact[];
   leadOwners: Record<string, string>;
   onAssignLead: (id: string, owner: string) => void;
+  onDeleteLead: (id: string) => Promise<void>;
   leadStages: Record<string, CrmStage>;
   onMoveLead: (id: string, stage: CrmStage) => void;
   leadCategories: Record<string, LeadCategory | "">;
@@ -80,8 +82,9 @@ function Title({ name, sub, eyebrow = "ROBIN ADMIN PLATFORM", children }: { name
   return <div className="title"><div><span>{eyebrow}</span><h1>{name}</h1><p>{sub}</p></div><div>{children}</div></div>;
 }
 
-function LeadInbox({ admins, contacts, leadOwners, leadStages, onAssignLead, notify }: FeatureModuleProps) {
+function LeadInbox({ admins, contacts, leadOwners, leadStages, onAssignLead, onDeleteLead, notify }: FeatureModuleProps) {
   const [query, setQuery] = useState("");
+  const [deleting, setDeleting] = useState<string | null>(null);
   const list = useMemo(() => contacts.filter((contact) => `${contact.name} ${contact.email} ${contact.source}`.toLowerCase().includes(query.toLowerCase())), [contacts, query]);
   return (
     <div className="page">
@@ -95,7 +98,7 @@ function LeadInbox({ admins, contacts, leadOwners, leadStages, onAssignLead, not
       <section className="panel inbox-panel">
         <div className="data-table">
           <table>
-            <thead><tr><th>Lead</th><th>Origen</th><th>Estado</th><th>Valor</th><th>Asignar a</th></tr></thead>
+            <thead><tr><th>Lead</th><th>Origen</th><th>Estado</th><th>Valor</th><th>Asignar a</th><th>Acciones</th></tr></thead>
             <tbody>
               {list.map((contact) => (
                 <tr key={contact.id}>
@@ -116,6 +119,13 @@ function LeadInbox({ admins, contacts, leadOwners, leadStages, onAssignLead, not
                       {admins.map((admin) => <option key={admin}>{admin}</option>)}
                     </select>
                   </td>
+                  <td><button className="delete-lead" type="button" disabled={deleting === contact.id} onClick={async () => {
+                    if (!window.confirm(`¿Eliminar definitivamente a ${contact.name} de la bandeja y del CRM?`)) return;
+                    setDeleting(contact.id);
+                    try { await onDeleteLead(contact.id); notify(`${contact.name} eliminado correctamente`); }
+                    catch (error) { notify(error instanceof Error ? error.message : "No se pudo eliminar el lead"); }
+                    finally { setDeleting(null); }
+                  }}><Trash2 />{deleting === contact.id ? "Eliminando…" : "Eliminar"}</button></td>
                 </tr>
               ))}
             </tbody>

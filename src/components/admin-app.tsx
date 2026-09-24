@@ -13,6 +13,7 @@ import {
   CircleDollarSign,
   CreditCard,
   FileText,
+  ExternalLink,
   GraduationCap,
   Handshake,
   HelpCircle,
@@ -23,7 +24,6 @@ import {
   PieChart,
   Plane,
   Percent,
-  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -36,13 +36,11 @@ import {
   X,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
-  ComposedChart,
   CartesianGrid,
   Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -249,7 +247,8 @@ export function AdminApp({ authUser, onLogout }: { authUser: PortalAdmin; onLogo
 
   const dashboardLoading =
     (!crmLoaded && (path === "/bandeja-leads" || path.startsWith("/crm"))) ||
-    (portalLoading && ["/", "/alumnos-global", "/pagos"].includes(path));
+    (portalLoading && (["/", "/alumnos-global", "/pagos"].includes(path) || path.startsWith("/informes/inicio"))) ||
+    (!crmLoaded && path.startsWith("/informes/inicio"));
 
   return (
     <div className={`shell ${area === "subscriptions" ? "subscriptions-shell" : ""}`}>
@@ -293,16 +292,14 @@ export function AdminApp({ authUser, onLogout }: { authUser: PortalAdmin; onLogo
           <nav className="workspace-tabs" aria-label="Áreas del gestor">
             {workspaceTabs.map(([href, label, tabArea]) => <a href={href} key={href} className={area === tabArea ? "active" : ""} onClick={(event) => { event.preventDefault(); event.stopPropagation(); window.location.assign(href); }}>{label}</a>)}
           </nav>
-          <label className="global-search"><Search /><input placeholder="Buscar en Robin…" /><kbd>⌘ K</kbd></label>
           <div className="top-actions">
             <span className="authenticated-user">{currentUser}</span>
-            <button aria-label="Notificaciones"><Bell /><i /></button>
             <button aria-label="Cerrar sesión" onClick={() => void onLogout()}><LogOut /></button>
           </div>
         </header>
 
         <main>
-          {dashboardLoading || (path === "/" && holdedLoading) ? <div className="page"><DashboardLoader /></div> : path === "/" ? <Dashboard snapshot={portalSnapshot} contacts={crmContacts} leadStages={leadStages} currentUser={currentUser} holded={holdedSnapshot} /> : (
+          {dashboardLoading || ((path === "/" || path.startsWith("/informes/inicio")) && holdedLoading) ? <div className="page"><DashboardLoader /></div> : path === "/" ? <Dashboard snapshot={portalSnapshot} contacts={crmContacts} leadStages={leadStages} currentUser={currentUser} holded={holdedSnapshot} /> : path.startsWith("/informes/inicio") ? <DashboardReport snapshot={portalSnapshot} contacts={crmContacts} leadStages={leadStages} holded={holdedSnapshot} /> : (
             <FeatureModule
               path={path}
               notify={setNotice}
@@ -359,6 +356,10 @@ function Head({ title, sub, action }: { title: string; sub: string; action?: str
   return <header className="phead"><div><h2>{title}</h2><p>{sub}</p></div>{action && <button>{action}</button>}</header>;
 }
 
+function dashboardReportUrl(type: "altas" | "embudo" | "facturacion", period: string) {
+  return `/informes/inicio?tipo=${type}&periodo=${period}`;
+}
+
 function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { snapshot: PortalSnapshot | null; contacts: Contact[]; leadStages: Record<string, CrmStage>; currentUser: string; holded: HoldedSnapshot | null }) {
   const [period, setPeriod] = useState<"7" | "15" | "30" | "all">("30");
   const today = new Date(); today.setHours(23, 59, 59, 999);
@@ -374,10 +375,10 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
   const newClients = clients.filter((client) => inRange(client.created_at));
   const activeLeads = contacts.filter((lead) => !["Cliente", "Lost"].includes(leadStages[lead.id] || lead.stage || "Por contactar"));
   const liveStats = [
-    ["Leads activos", String(activeLeads.length), "CRM conectado", Users, "blue"],
-    ["Nuevos leads", String(newLeads.length), periodLabel, Sparkles, "gold"],
-    ["Clientes del portal", String(clients.length), `${clients.filter((client) => client.requires_onboarding).length} en onboarding`, GraduationCap, "green"],
-    ["Facturado este año", holded ? `${Math.round(holded.currentYear.billed).toLocaleString("es-ES")} €` : "—", holded ? `${holded.currentYear.invoices} facturas en Holded` : "Holded no disponible", CircleDollarSign, "red"],
+    ["Leads activos", String(activeLeads.length), "CRM conectado", Users, "blue", null],
+    ["Nuevos leads", String(newLeads.length), periodLabel, Sparkles, "gold", null],
+    ["Clientes del portal", String(clients.length), `${clients.filter((client) => client.requires_onboarding).length} en onboarding`, GraduationCap, "green", null],
+    ["Facturado este año", holded ? `${Math.round(holded.currentYear.billed).toLocaleString("es-ES")} €` : "—", holded ? `${holded.currentYear.invoices} facturas en Holded` : "Holded no disponible", CircleDollarSign, "red", dashboardReportUrl("facturacion", period)],
   ] as const;
   const visibleDays = Math.min(31, Math.max(1, Math.floor((today.getTime() - rangeStart.getTime()) / 86400000) + 1));
   const chartStart = new Date(today); chartStart.setDate(today.getDate() - visibleDays + 1); chartStart.setHours(0, 0, 0, 0);
@@ -400,16 +401,17 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
       </div>
 
       <section className="stats">
-        {liveStats.map(([label, value, detail, Icon, tone]) => <article key={label}><i className={tone}><Icon /></i><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></article>)}
+        {liveStats.map(([label, value, detail, Icon, tone, report]) => report ? <a className="stat-report-link" href={report} target="_blank" rel="noreferrer" key={label} aria-label={`Abrir informe de ${label}`}><article><i className={tone}><Icon /></i><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div><ExternalLink /></article></a> : <article key={label}><i className={tone}><Icon /></i><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></article>)}
       </section>
 
       <div className="grid">
-        <section className="panel chart">
-          <Head title="Nuevos leads y clientes" sub={`Altas diarias · ${periodLabel.toLowerCase()}`} />
+        <a className="panel chart report-chart" href={dashboardReportUrl("altas", period)} target="_blank" rel="noreferrer" aria-label="Abrir informe de nuevos leads y clientes">
+          <header className="phead"><div><h2>Nuevos leads y clientes</h2><p>Altas diarias · {periodLabel.toLowerCase()}</p></div><span className="report-hint">Ver informe <ExternalLink /></span></header>
+          <div className="chart-legend"><span className="leads">Leads</span><span className="clients">Clientes</span></div>
           <ResponsiveContainer width="100%" height={270}>
-            <ComposedChart data={dailyData} margin={{ left: -24, right: 10 }}><CartesianGrid vertical={false} stroke="#e8edf3" /><XAxis dataKey="day" axisLine={false} tickLine={false} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Bar dataKey="clients" name="Clientes" fill="#d69b3b" radius={[4,4,0,0]} /><Line type="monotone" dataKey="leads" name="Leads" stroke="#1f416f" strokeWidth={3} dot={{ r: 3 }} /></ComposedChart>
+            <LineChart data={dailyData} margin={{ left: -24, right: 10 }}><CartesianGrid vertical={false} stroke="#e8edf3" /><XAxis dataKey="day" axisLine={false} tickLine={false} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Line type="monotone" dataKey="leads" name="Leads" stroke="#1f416f" strokeWidth={3} dot={{ r: 3, fill: "#1f416f" }} activeDot={{ r: 5 }} /><Line type="monotone" dataKey="clients" name="Clientes" stroke="#d69b3b" strokeWidth={3} dot={{ r: 3, fill: "#d69b3b" }} activeDot={{ r: 5 }} /></LineChart>
           </ResponsiveContainer>
-        </section>
+        </a>
 
         <section className="panel attention">
           <Head title="Leads calientes" sub={`Heat igual o superior a 80 · ${currentUser}`} />
@@ -418,17 +420,73 @@ function Dashboard({ snapshot, contacts, leadStages, currentUser, holded }: { sn
       </div>
 
       <div className="lower">
-        <section className="panel">
-          <Head title="Embudo de captación" sub="Fases reales del CRM" />
+        <a className="panel report-chart" href={dashboardReportUrl("embudo", period)} target="_blank" rel="noreferrer" aria-label="Abrir informe del embudo de captación">
+          <header className="phead"><div><h2>Embudo de captación</h2><p>Fases reales del CRM</p></div><span className="report-hint">Ver informe <ExternalLink /></span></header>
           <div className="funnel">{funnel.map(([label, value]) => <div key={label}><p><span>{label}</span><strong>{value}</strong></p><div><i style={{ width: `${Math.max(3, value / funnelBase * 100)}%` }} /></div></div>)}</div>
           <div className="conversion"><strong>{contacts.length ? `${(funnel[funnel.length - 1][1] / contacts.length * 100).toFixed(1)}%` : "0%"}</strong><span>Conversión total a cliente</span><b>{funnel[funnel.length - 1][1]} clientes</b></div>
-        </section>
+        </a>
 
-        <section className="panel">
-          <Head title="Facturación anual" sub="Datos reales de Holded" />
+        <a className="panel report-chart" href={dashboardReportUrl("facturacion", period)} target="_blank" rel="noreferrer" aria-label="Abrir informe de facturación anual">
+          <header className="phead"><div><h2>Facturación anual</h2><p>Datos reales de Holded</p></div><span className="report-hint">Ver informe <ExternalLink /></span></header>
           <ResponsiveContainer width="100%" height={210}><BarChart data={financeData} layout="vertical" margin={{ left: 24, right: 18 }}><CartesianGrid horizontal={false} stroke="#e8edf3" /><XAxis type="number" axisLine={false} tickLine={false} /><YAxis type="category" dataKey="label" axisLine={false} tickLine={false} width={72} /><Tooltip formatter={(value) => `${Number(value).toLocaleString("es-ES")} €`} /><Bar dataKey="value" fill="#1f416f" radius={[0,5,5,0]} /></BarChart></ResponsiveContainer>
-        </section>
+        </a>
       </div>
     </div>
   );
+}
+
+function DashboardReport({ snapshot, contacts, leadStages, holded }: { snapshot: PortalSnapshot | null; contacts: Contact[]; leadStages: Record<string, CrmStage>; holded: HoldedSnapshot | null }) {
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get("tipo") || "altas";
+  const rawPeriod = params.get("periodo") || "30";
+  const periodDays = rawPeriod === "all" ? null : Number(rawPeriod);
+  const today = new Date(); today.setHours(23, 59, 59, 999);
+  const start = periodDays ? new Date(today.getTime() - (periodDays - 1) * 86400000) : null;
+  if (start) start.setHours(0, 0, 0, 0);
+  const inRange = (date?: string | null) => Boolean(date && (!start || new Date(date) >= start) && new Date(date) <= today);
+  const clients = snapshot?.clients || [];
+  const leadsInRange = contacts.filter((lead) => inRange(lead.createdAt));
+  const clientsInRange = clients.filter((client) => inRange(client.created_at));
+  const periodLabel = periodDays ? `Últimos ${periodDays} días` : "Todo el histórico";
+  const stages: Array<[string, CrmStage]> = [["Por contactar", "Por contactar"], ["Contactados", "Contactado"], ["Llamadas programadas", "Llamada programada"], ["Propuestas enviadas", "Propuesta enviada"], ["Clientes", "Cliente"]];
+  const title = type === "facturacion" ? "Informe de facturación anual" : type === "embudo" ? "Informe del embudo de captación" : "Informe de nuevos leads y clientes";
+
+  return <div className="page report-page">
+    <div className="title"><div><span>INFORME DETALLADO</span><h1>{title}</h1><p>Origen, criterio de cálculo y registros que componen el resultado.</p></div><button className="report-close" onClick={() => window.close()}>Cerrar pestaña</button></div>
+
+    {type === "altas" && <>
+      <section className="report-summary"><article><span>Leads</span><strong>{leadsInRange.length}</strong><small>Registros del CRM creados en el periodo</small></article><article><span>Clientes</span><strong>{clientsInRange.length}</strong><small>Altas del Portal del Alumno en el periodo</small></article><article><span>Periodo</span><strong>{periodLabel}</strong><small>{start ? `${start.toLocaleDateString("es-ES")} – ${today.toLocaleDateString("es-ES")}` : "Sin límite de fecha inicial"}</small></article></section>
+      <ReportMethod text="Cada punto de la gráfica cuenta los registros cuya fecha de creación cae dentro de ese día natural. La línea azul procede del CRM y la naranja del Portal del Alumno." />
+      <ReportTable headers={["Tipo", "Nombre", "Email", "Fecha de alta"]} rows={[...leadsInRange.map((lead) => ["Lead", lead.name, lead.email, formatReportDate(lead.createdAt)]), ...clientsInRange.map((client) => ["Cliente", [client.nombre, client.apellidos].filter(Boolean).join(" ") || "Sin nombre", client.email || "—", formatReportDate(client.created_at)])]} />
+    </>}
+
+    {type === "embudo" && <>
+      <section className="report-summary"><article><span>Base del embudo</span><strong>{contacts.length}</strong><small>Todos los leads del CRM</small></article><article><span>Clientes</span><strong>{contacts.filter((lead) => (leadStages[lead.id] || lead.stage) === "Cliente").length}</strong><small>Leads en fase Cliente</small></article><article><span>Conversión</span><strong>{contacts.length ? `${(contacts.filter((lead) => (leadStages[lead.id] || lead.stage) === "Cliente").length / contacts.length * 100).toFixed(1)}%` : "0%"}</strong><small>Clientes ÷ total de leads × 100</small></article></section>
+      <ReportMethod text="Cada fila agrupa los leads por su fase actual en el CRM. La conversión se obtiene dividiendo los leads en fase Cliente entre el total de registros del CRM." />
+      <ReportTable headers={["Fase", "Registros", "% del total"]} rows={stages.map(([label, stage]) => { const count = contacts.filter((lead) => (leadStages[lead.id] || lead.stage || "Por contactar") === stage).length; return [label, String(count), contacts.length ? `${(count / contacts.length * 100).toFixed(1)}%` : "0%"]; })} />
+    </>}
+
+    {type === "facturacion" && <>
+      <section className="report-summary"><article><span>Facturado</span><strong>{formatMoney(holded?.currentYear.billed)}</strong><small>{holded?.currentYear.invoices || 0} facturas</small></article><article><span>Cobrado</span><strong>{formatMoney(holded?.currentYear.collected)}</strong><small>Importe pagado acumulado</small></article><article><span>Pendiente</span><strong>{formatMoney(holded?.currentYear.pending)}</strong><small>Facturado menos cobrado</small></article></section>
+      <ReportMethod text="Los importes proceden de la sincronización con Holded para el año natural en curso. Facturado es la suma del total de las facturas; cobrado suma sus importes pagados; pendiente es la diferencia aún no cobrada." />
+      <ReportTable headers={["Factura", "Cliente", "Fecha", "Total", "Cobrado", "Pendiente"]} rows={(holded?.recentInvoices || []).map((invoice) => [invoice.number || invoice.id, invoice.customer || "—", formatReportDate(invoice.date), formatMoney(invoice.total), formatMoney(invoice.paid), formatMoney(invoice.pending)])} empty="Holded no ha devuelto facturas recientes para mostrar el desglose." />
+      {holded?.syncedAt && <p className="report-sync">Datos sincronizados el {new Date(holded.syncedAt).toLocaleString("es-ES")}.</p>}
+    </>}
+  </div>;
+}
+
+function ReportMethod({ text }: { text: string }) {
+  return <section className="report-method"><FileText /><div><strong>Cómo se calcula</strong><p>{text}</p></div></section>;
+}
+
+function ReportTable({ headers, rows, empty = "No hay registros para este periodo." }: { headers: string[]; rows: string[][]; empty?: string }) {
+  return <section className="panel report-table"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${row[0]}-${index}`}>{row.map((cell, cellIndex) => <td key={`${cellIndex}-${cell}`}>{cell}</td>)}</tr>)}</tbody></table>{!rows.length && <p>{empty}</p>}</section>;
+}
+
+function formatReportDate(value?: string | null) {
+  return value ? new Date(value).toLocaleDateString("es-ES") : "—";
+}
+
+function formatMoney(value?: number) {
+  return value == null ? "—" : `${value.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
